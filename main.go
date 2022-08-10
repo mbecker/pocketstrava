@@ -86,7 +86,7 @@ func main() {
 				if ev.TopicPartition.Error != nil {
 					log.Printf("Kafka Producer Error - Delivery failed: key=%s value=%s\n", ev.Key, string(ev.Value))
 				} else {
-					log.Printf("Kafka Producer Success - Delivery failed: key=%s value=%s\n", ev.Key, string(ev.Value))
+					log.Printf("Kafka Producer Success - Delivery success: key=%s value=%s\n", ev.Key, string(ev.Value))
 				}
 			}
 		}
