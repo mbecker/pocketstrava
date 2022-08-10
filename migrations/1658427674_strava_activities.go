@@ -176,7 +176,7 @@ func init() {
 		return daos.New(db).SaveCollection(collection)
 	}, func(db dbx.Builder) error {
 		tables := []string{
-			OAuthTokenCollectionName,
+			ActivityCollectionName,
 		}
 
 		for _, name := range tables {

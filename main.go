@@ -21,13 +21,16 @@ import (
 	staticmaps "github.com/flopp/go-staticmaps"
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v5"
+	"github.com/mbecker/pocketstrava/handler"
 	"github.com/mbecker/pocketstrava/migrations"
+	internalmodels "github.com/mbecker/pocketstrava/models"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/daos"
 	"github.com/pocketbase/pocketbase/forms"
+	"github.com/pocketbase/pocketbase/mails"
 	"github.com/pocketbase/pocketbase/models"
 	"github.com/pocketbase/pocketbase/tools/auth"
 	"github.com/pocketbase/pocketbase/tools/rest"
@@ -46,8 +49,8 @@ type StravaActivitiesMsg struct {
 	After  int64 `json:"after"`
 }
 
-var kp *kafka.Producer
-var kptopic string
+var KP *kafka.Producer
+var KPTOPIC string
 
 func main() {
 	err := godotenv.Load()
@@ -59,23 +62,31 @@ func main() {
 	app := pocketbase.New()
 	c := cron.New()
 
-	kptopic = os.Getenv("TOPIC")
-	kp, err = kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": os.Getenv("BOOTSTRAP_SERVER")})
+	KPTOPIC = os.Getenv("KAFKA_TOPIC")
+	// Produce a new record to the topic...
+	KP, err = kafka.NewProducer(&kafka.ConfigMap{
+		"bootstrap.servers": os.Getenv("KAFKA_BOOTSTRAP_SERVER"),
+		"sasl.mechanisms":   "PLAIN",
+		"security.protocol": "SASL_PLAINTEXT",
+		"sasl.username":     os.Getenv("KAFKA_USERNAME"),
+		"sasl.password":     os.Getenv("KAFKA_PASSWORD")})
 	if err != nil {
-		panic(err)
+		log.Panic(err)
+	} else {
+		log.Println("Kafka Connect success")
 	}
 
-	defer kp.Close()
+	defer KP.Close()
 
 	// Delivery report handler for produced messages
 	go func() {
-		for e := range kp.Events() {
+		for e := range KP.Events() {
 			switch ev := e.(type) {
 			case *kafka.Message:
 				if ev.TopicPartition.Error != nil {
-					fmt.Printf("Kafka Producer delivery failed: %v\n", ev.TopicPartition)
+					log.Printf("Kafka Producer Error - Delivery failed: key=%s value=%s\n", ev.Key, string(ev.Value))
 				} else {
-					fmt.Printf("Kafka Producer delivered message to %v\n", ev.TopicPartition)
+					log.Printf("Kafka Producer Success - Delivery failed: key=%s value=%s\n", ev.Key, string(ev.Value))
 				}
 			}
 		}
@@ -111,6 +122,25 @@ func main() {
 			settings.StravaAuth.Enabled = true
 			settings.StravaAuth.ClientId = os.Getenv("CLIENT_ID")
 			settings.StravaAuth.ClientSecret = os.Getenv("CLIENT_SECRET")
+
+			// SMTP
+			smtpEnabled, err := strconv.ParseBool(os.Getenv("SMTP_ENABLED"))
+			if err == nil && smtpEnabled {
+				settings.Smtp.Enabled = true
+				settings.Smtp.Host = os.Getenv("SMTP_HOST")
+				port, err := strconv.Atoi(os.Getenv("SMTP_PORT"))
+				if err != nil {
+					settings.Smtp.Port = port
+				}
+				settings.Smtp.Password = os.Getenv(("SMTP_PASSWORD"))
+				settings.Smtp.Username = os.Getenv(("SMTP_USERNAME"))
+			}
+
+			if len(os.Getenv("USER_CONFIRM_EMAIL_CHANGE_URL")) > 0 {
+				settings.Meta.UserConfirmEmailChangeUrl = os.Getenv("USER_CONFIRM_EMAIL_CHANGE_URL")
+			}
+
+			/// Marshalt settings JSON, update DB and refresh app settings
 			j, err := json.Marshal(settings)
 			if err != nil {
 				log.Printf("Error marshal settings: err=%s", err)
@@ -119,7 +149,7 @@ func main() {
 				if err != nil {
 					log.Printf("Error update settings: err=%s", err)
 				} else {
-					log.Printf("Success update settings res=%s", res)
+					log.Printf("Success update strava auth settings res=%s", res)
 					e.App.RefreshSettings()
 				}
 			}
@@ -127,7 +157,6 @@ func main() {
 
 		// Initialize cronjob
 		c.AddFunc("*/1 * * * *", func() {
-
 			nowTime := time.Now().UTC().Add(30 * time.Minute).Format(types.DefaultDateLayout)
 			log.Printf("Starting cronjob: OAuthToken refresh with time=%s", nowTime)
 			oAuthTokenCollection, err := app.Dao().FindCollectionByNameOrId(migrations.OAuthTokenCollectionName)
@@ -320,6 +349,180 @@ func main() {
 			},
 		})
 
+		/**
+		 * EMAIL
+		 */
+
+		// POST /api/email/confirmation
+		e.Router.AddRoute(echo.Route{
+			Method: http.MethodPost,
+			Path:   "/api/email/confirmation",
+			Handler: func(c echo.Context) error {
+				cErr := handler.CustomError{
+					Code:        http.StatusOK,
+					Level:       handler.INFO,
+					Message:     "Email confirmed",
+					ErrorDetail: nil,
+				}
+
+				// u, ok := c.Get(ContextUserKey).(*models.User)
+				// if !ok {
+				// 	return c.JSON(http.StatusUnauthorized, rest.NewForbiddenError("no auth user", nil))
+				// }
+				token := new(internalmodels.Token)
+				err := c.Bind(token)
+				if err != nil {
+					cErr.Code = http.StatusBadRequest
+					cErr.Level = handler.ERROR
+					cErr.Message = "Error binding token request"
+					cErr.ErrorDetail = err
+					return c.JSON(cErr.Code, cErr)
+				}
+				rec, email, err := handler.ParseToken(app, token.Token)
+				if err != nil {
+					log.Println(err)
+					cErr.Code = http.StatusBadRequest
+					cErr.Level = handler.ERROR
+					cErr.Message = "Error parsing token"
+					cErr.ErrorDetail = err
+					return c.JSON(cErr.Code, cErr)
+				}
+
+				err = internalmodels.EmailSetValid(app, rec)
+				if err != nil {
+					log.Println(err)
+					cErr.Code = http.StatusBadRequest
+					cErr.Level = handler.ERROR
+					cErr.Message = "Error saving email confirmation"
+					cErr.ErrorDetail = err
+					return c.JSON(cErr.Code, cErr)
+				}
+
+				cErr.Message = fmt.Sprintf("Email confirmed: %s", email)
+				return c.JSON(cErr.Code, cErr)
+			}, Middlewares: []echo.MiddlewareFunc{
+				apis.RequireAdminOrUserAuth(),
+			}})
+
+		// "POST /api/settings/email"
+		e.Router.AddRoute(echo.Route{
+			Method: http.MethodPost,
+			Path:   "/api/email/email",
+			Handler: func(c echo.Context) error {
+				cErr := handler.CustomError{
+					Code:        http.StatusOK,
+					Level:       handler.INFO,
+					Message:     "Mail sent",
+					ErrorDetail: nil,
+				}
+
+				u, ok := c.Get(ContextUserKey).(*models.User)
+				if !ok {
+					return c.JSON(http.StatusUnauthorized, rest.NewForbiddenError("no auth user", nil))
+				}
+				email := new(internalmodels.Email)
+				// if err := c.(*handler.Context).BindValidate(email); err != nil {
+				// 	log.Println(err)
+				// 	if cErr, ok := err.(*handler.CustomError); ok {
+				// 		return c.JSON(cErr.Code, cErr)
+				// 	}
+				// 	return c.JSON(http.StatusBadRequest, err)
+				// }
+
+				err := c.Bind(&email)
+				if err != nil {
+					cErr.Code = http.StatusBadRequest
+					cErr.Level = handler.ERROR
+					cErr.Message = "Error decoding body"
+					cErr.ErrorDetail = err
+					return c.JSON(cErr.Code, cErr)
+				}
+
+				// Insert and check database
+				emailCollection, err := app.Dao().FindCollectionByNameOrId(migrations.EmailCollectionName)
+				if err != nil {
+					cErr.Code = http.StatusBadRequest
+					cErr.Level = handler.ERROR
+					cErr.Message = "Email collection not found"
+					cErr.ErrorDetail = err
+					return c.JSON(cErr.Code, cErr)
+				}
+
+				// If "email.retrigger" then check that the email is already in DB and that it's not valid
+				var expr dbx.HashExp
+				if email.Retrigger {
+					expr = dbx.HashExp{"email": email.Email, models.ProfileCollectionUserFieldName: u.Id, migrations.EmailValid: false}
+				} else {
+					expr = dbx.HashExp{"email": email.Email, models.ProfileCollectionUserFieldName: u.Id}
+				}
+
+				emailRecords, err := app.Dao().FindRecordsByExpr(emailCollection, expr)
+				if err != nil {
+					cErr.Code = http.StatusBadRequest
+					cErr.Level = handler.ERROR
+					cErr.Message = "Email records query validation error"
+					cErr.ErrorDetail = err
+					return c.JSON(cErr.Code, cErr)
+				}
+
+				// If "email.retrigger" the expect result is exatcly len=1
+				if email.Retrigger {
+					if len(emailRecords) != 1 {
+						cErr.Code = http.StatusBadRequest
+						cErr.Level = handler.ERROR
+						cErr.Message = "Email retrigger and not exactly one email"
+						cErr.ErrorDetail = err
+						return c.JSON(cErr.Code, cErr)
+					}
+				} else {
+					if len(emailRecords) != 0 {
+						cErr.Code = http.StatusBadRequest
+						cErr.Level = handler.ERROR
+						cErr.Message = "No unique email for user"
+						cErr.ErrorDetail = err
+						return c.JSON(cErr.Code, cErr)
+					}
+
+					rec := models.NewRecord(emailCollection)
+					rec.SetDataValue(models.ProfileCollectionUserFieldName, u.Id)
+					rec.SetDataValue(migrations.EmailEmail, email.Email)
+					rec.SetDataValue(migrations.EmailValid, false)
+
+					log.Println(rec)
+					err = forms.NewRecordUpsert(app, rec).Submit()
+					if err != nil {
+						log.Println(err)
+						cErr.Code = http.StatusBadRequest
+						cErr.Level = handler.ERROR
+						cErr.Message = "Error saving record"
+						cErr.ErrorDetail = err
+						return c.JSON(cErr.Code, cErr)
+					}
+				}
+
+				u.Email = email.Email
+				err = mails.SendUserChangeEmail(app, u, email.Email)
+
+				if err != nil {
+					cErr = handler.CustomError{
+						Code:        http.StatusBadRequest,
+						Level:       handler.ERROR,
+						Message:     "Error sending mail",
+						ErrorDetail: err,
+					}
+				}
+				log.Printf("Send mail for new email: userId=%s email=%s", u.Id, email.Email)
+				return c.JSON(cErr.Code, cErr)
+			},
+			Middlewares: []echo.MiddlewareFunc{
+				apis.RequireAdminOrUserAuth(),
+			},
+		})
+
+		/**
+		 * STRAVA ACTIVITIES
+		 */
+
 		// "POST /api/strava/activities"
 		// Request Query Params: after(int64), before(int64)
 		e.Router.AddRoute(echo.Route{
@@ -452,6 +655,7 @@ func main() {
 
 	app.OnUserAuthRequest().Add(func(e *core.UserAuthEvent) error {
 
+		log.Println("=== START Hook OnUserAuthRequest ===")
 		meta, ok := e.Meta.(*auth.AuthUser)
 		if !ok {
 			log.Printf("Event hook -- OnAuthRequest: No AuthUser in meta")
@@ -479,12 +683,16 @@ func main() {
 			err = errors.New("more than one record for user/provider")
 		}
 		if err != nil {
+			log.Printf("Error creating / updating oauthtoken record: %s", err)
 			return err
 		}
+
+		log.Printf("Meta: %s", meta)
 
 		// Request Strava activities for each AuthRequest
 		stravaUserId, err := strconv.ParseInt(meta.Id, 10, 64)
 		if err != nil {
+			log.Printf("Error parsing strava athlete id: %s", err)
 			return err
 		}
 		var msg StravaActivitiesMsg
@@ -498,12 +706,13 @@ func main() {
 		}
 		activities, err := services.Do()
 		if err != nil {
-			log.Printf("err=%s", err)
+			log.Printf("error requesting strava activities: %s", err)
 			return err
 		}
 
 		createActivities(app, e.User.Id, activities)
 
+		log.Println("=== END Hook OnUserAuthRequest ===")
 		return nil
 	})
 
@@ -611,13 +820,16 @@ func newOAuthTokenRecord(dao *daos.Dao, rec *models.Record, collection *models.C
 		Expiry:         token.Expiry,
 	}
 	bdata, berr := json.Marshal(data)
+
 	if berr == nil {
-		kp.Produce(&kafka.Message{
-			TopicPartition: kafka.TopicPartition{Topic: &kptopic, Partition: kafka.PartitionAny},
+		KP.Produce(&kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &KPTOPIC, Partition: kafka.PartitionAny},
 			Key:            []byte(*providerUserId),
 			Value:          bdata,
 		}, nil)
 	}
+	log.Printf("Error: %s", err)
+	log.Printf("Record: %s", rec)
 	return rec, err
 }
 

@@ -12,8 +12,11 @@ require (
 require (
 	github.com/confluentinc/confluent-kafka-go v1.9.2 // indirect
 	github.com/flopp/go-coordsparser v0.0.0-20201115094714-8baaeb7062d5 // indirect
+	github.com/go-playground/locales v0.13.0 // indirect
+	github.com/go-playground/universal-translator v0.17.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/joho/godotenv v1.4.0 // indirect
+	github.com/leodido/go-urn v1.2.0 // indirect
 	github.com/tkrajina/gpxgo v1.1.2 // indirect
 )
 
@@ -47,6 +50,7 @@ require (
 	github.com/fogleman/gg v1.3.0
 	github.com/ganigeorgiev/fexpr v0.1.1 // indirect
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0 // indirect
+	github.com/go-playground/validator v9.31.0+incompatible
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/golang-jwt/jwt/v4 v4.4.2 // indirect
 	github.com/golang/geo v0.0.0-20210211234256-740aa86cb551
