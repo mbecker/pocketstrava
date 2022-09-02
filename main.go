@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,6 +59,7 @@ func main() {
 
 	// Initialize app, cronjob, kafka
 	app := pocketbase.New()
+
 	c := cron.New()
 
 	KPTOPIC = os.Getenv("KAFKA_TOPIC")
@@ -94,7 +94,7 @@ func main() {
 
 	app.OnBeforeServe().Add(func(e *core.ServeEvent) error {
 		var err error
-		var res sql.Result
+		// var res sql.Result
 		// res, err := e.App.Dao().DB().NewQuery("CREATE UNIQUE INDEX activities_activityid_IDX ON activities (activityid)").Execute()
 		// if err != nil {
 		// 	log.Printf("Error create index: err=%s", err)
@@ -113,49 +113,17 @@ func main() {
 			log.Printf("Error creating admin: err=%s", err)
 		}
 
-		// Init OAuth provider
-		var settings core.Settings
-		err = json.Unmarshal([]byte(`{"meta":{"appName":"Acme","appUrl":"http://localhost:8090","senderName":"Support","senderAddress":"support@example.com","userVerificationUrl":"%APP_URL%/_/#/users/confirm-verification/%TOKEN%","userResetPasswordUrl":"%APP_URL%/_/#/users/confirm-password-reset/%TOKEN%","userConfirmEmailChangeUrl":"%APP_URL%/_/#/users/confirm-email-change/%TOKEN%"},"logs":{"maxDays":7},"smtp":{"enabled":false,"host":"smtp.example.com","port":587,"username":"","password":"","tls":false},"s3":{"enabled":false,"bucket":"","region":"","endpoint":"","accessKey":"","secret":""},"adminAuthToken":{"secret":"nYC34DS4IXtGG8d3HZIaLjgemQcg7v1yHxPCglZk0vEjw1VC9f","duration":1209600},"adminPasswordResetToken":{"secret":"av2hjrRXLWRZwYur29ByGB9kZblcTZ8n5tMBm0UvlBvAoxPRiq","duration":1800},"userAuthToken":{"secret":"5w1RwTkHuowGVGtAWZNzcDELr1kFieNMe7jEzBZK7UOkWJfc2y","duration":1209600},"userPasswordResetToken":{"secret":"esw3u4NiAz0vRWTKh3jDGWX4TiKfH5h6lR7DPFBqlDPxe8RQEa","duration":1800},"userEmailChangeToken":{"secret":"0OyEwCvEyIAZEnwqHz9diQ7sW9JetzPTu3BDotk0MEDTr7JoOm","duration":1800},"userVerificationToken":{"secret":"XJZH1VI2tHrc9oWucoOgfCxIodAyAE0Yf2GpJEbjmJhh7Hpjfo","duration":604800},"emailAuth":{"enabled":true,"exceptDomains":null,"onlyDomains":null,"minPasswordLength":8},"googleAuth":{"enabled":false,"allowRegistrations":true},"facebookAuth":{"enabled":false,"allowRegistrations":true},"githubAuth":{"enabled":false,"allowRegistrations":true},"gitlabAuth":{"enabled":false,"allowRegistrations":true},"stravaAuth":{"enabled":true,"allowRegistrations":true,"clientId":"0000","clientSecret":"000"}}`), &settings)
+		/**
+		* SETTINGS
+		 */
+		err = setAppSettings(e)
 		if err != nil {
-			log.Printf("Error unmarshal settings: err=%s", err)
-		} else {
-			settings.StravaAuth.Enabled = true
-			settings.StravaAuth.ClientId = os.Getenv("CLIENT_ID")
-			settings.StravaAuth.ClientSecret = os.Getenv("CLIENT_SECRET")
-
-			// SMTP
-			smtpEnabled, err := strconv.ParseBool(os.Getenv("SMTP_ENABLED"))
-			if err == nil && smtpEnabled {
-				settings.Smtp.Enabled = true
-				settings.Smtp.Host = os.Getenv("SMTP_HOST")
-				port, err := strconv.Atoi(os.Getenv("SMTP_PORT"))
-				if err != nil {
-					settings.Smtp.Port = port
-				}
-				settings.Smtp.Password = os.Getenv(("SMTP_PASSWORD"))
-				settings.Smtp.Username = os.Getenv(("SMTP_USERNAME"))
-			}
-
-			if len(os.Getenv("USER_CONFIRM_EMAIL_CHANGE_URL")) > 0 {
-				settings.Meta.UserConfirmEmailChangeUrl = os.Getenv("USER_CONFIRM_EMAIL_CHANGE_URL")
-			}
-
-			/// Marshalt settings JSON, update DB and refresh app settings
-			j, err := json.Marshal(settings)
-			if err != nil {
-				log.Printf("Error marshal settings: err=%s", err)
-			} else {
-				res, err = e.App.DB().NewQuery("UPDATE `_params` SET `value`={:j} WHERE `key`='settings'").Bind(dbx.Params{"j": j}).Execute()
-				if err != nil {
-					log.Printf("Error update settings: err=%s", err)
-				} else {
-					log.Printf("Success update strava auth settings res=%s", res)
-					e.App.RefreshSettings()
-				}
-			}
+			log.Panicf("(ERROR) Updating settings: err=%s", err)
 		}
 
-		// Initialize cronjob
+		/**
+		* CRONJOB
+		 */
 		c.AddFunc("*/1 * * * *", func() {
 			nowTime := time.Now().UTC().Add(30 * time.Minute).Format(types.DefaultDateLayout)
 			log.Printf("Starting cronjob: OAuthToken refresh with time=%s", nowTime)
@@ -210,6 +178,11 @@ func main() {
 		// serves static files from the provided public dir (if exists)
 		subFs := echo.MustSubFS(e.Router.Filesystem, "pb_public")
 		e.Router.GET("/*", apis.StaticDirectoryHandler(subFs, false))
+
+		/**
+		 * Route: MAP
+		 * /api/strava/map/:aid
+		 */
 
 		e.Router.AddRoute(echo.Route{
 			Method: http.MethodGet,
@@ -350,7 +323,9 @@ func main() {
 		})
 
 		/**
-		 * EMAIL
+		 * EMAIL Confirmation
+		 * /api/email/confirmation
+		 * /api/email/email
 		 */
 
 		// POST /api/email/confirmation
@@ -404,7 +379,7 @@ func main() {
 				apis.RequireAdminOrUserAuth(),
 			}})
 
-		// "POST /api/settings/email"
+		// "POST /api/email/email"
 		e.Router.AddRoute(echo.Route{
 			Method: http.MethodPost,
 			Path:   "/api/email/email",
@@ -511,7 +486,9 @@ func main() {
 						ErrorDetail: err,
 					}
 				}
-				log.Printf("Send mail for new email: userId=%s email=%s", u.Id, email.Email)
+				log.Printf("Send mail for new email: userId=%s email=%s error=%s", u.Id, email.Email, err)
+
+				// TODO: Respond with the email record (see how the collection response work)
 				return c.JSON(cErr.Code, cErr)
 			},
 			Middlewares: []echo.MiddlewareFunc{
@@ -616,42 +593,11 @@ func main() {
 		return nil
 	})
 
-	// app.OnUserAuthRequest().Add(func(e *core.UserAuthEvent) error {
-	// 	// log.Printf("Login Meta: %+v", reflect.TypeOf(e.Meta))
-	// 	meta, ok := e.Meta.(*auth.AuthUser)
-	// 	if !ok {
-	// 		log.Println("--- 1")
-	// 		return nil
-	// 	}
-	// 	log.Printf("OAuth2Token found: %+v", meta.Token)
-	// 	return nil
-	// })
-
-	// Event Hooks
-
-	// app.OnUserAfterOauth2Register().Add(func(e *core.UserOauth2RegisterEvent) error {
-
-	// 	dao := app.Dao()
-	// 	profileCollection, err := dao.FindCollectionByNameOrId(models.ProfileCollectionName)
-	// 	if err != nil{
-	// 		log.Printf("Event hook -- OnUserAfterOauth2Register: No profile collection error=%s", err)
-	// 		return nil
-	// 	}
-
-	// 	userProfile, err := dao.FindFirstRecordByData(
-	// 		profileCollection,
-	// 		models.ProfileCollectionUserFieldName,
-	// 		e.AuthData.Id,
-	// 	)
-	// 	if err != nil{
-	// 		log.Printf("Event hook -- OnUserAfterOauth2Register: Error find first record by data error=%s", errr)
-	// 		return nil
-	// 	}
-
-	// 	userProfile.SetDataValue()
-	// 	return nil
-
-	// })
+	/**
+	* User Auth Request
+	* Create / update strava.com ouath token in DB
+	* Request activities at strava.com and save in DB
+	 */
 
 	app.OnUserAuthRequest().Add(func(e *core.UserAuthEvent) error {
 
@@ -715,6 +661,10 @@ func main() {
 		log.Println("=== END Hook OnUserAuthRequest ===")
 		return nil
 	})
+
+	/**
+	* App Start
+	 */
 
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
@@ -841,4 +791,57 @@ type OAuthToken struct {
 	RefreshToken   string    `json,db:"refresh_token"`
 	TokenType      string    `json,db:"token_type"`
 	Expiry         time.Time `json,db:"expiry"`
+}
+
+func setAppSettings(e *core.ServeEvent) error {
+	var settings *core.Settings = core.NewSettings()
+	settings.Meta.AppName = os.Getenv("APP_NAME")
+	settings.StravaAuth.Enabled = true
+	settings.StravaAuth.ClientId = os.Getenv("CLIENT_ID")
+	settings.StravaAuth.ClientSecret = os.Getenv("CLIENT_SECRET")
+
+	// SMTP
+	smtpEnabled, err := strconv.ParseBool(os.Getenv("SMTP_ENABLED"))
+	if err == nil && smtpEnabled {
+		settings.Meta.SenderAddress = os.Getenv("META_SENDER_ADDRESS")
+		settings.Smtp.Enabled = true
+		settings.Smtp.Host = os.Getenv("SMTP_HOST")
+		port, err := strconv.Atoi(os.Getenv("SMTP_PORT"))
+		if err != nil {
+			settings.Smtp.Port = port
+		}
+		settings.Smtp.Password = os.Getenv(("SMTP_PASSWORD"))
+		settings.Smtp.Username = os.Getenv(("SMTP_USERNAME"))
+	}
+
+	if len(os.Getenv("USER_CONFIRM_EMAIL_CHANGE_URL")) > 0 {
+		confirmEmailChangeTemplate := settings.Meta.ConfirmEmailChangeTemplate
+		confirmEmailChangeTemplate.ActionUrl = os.Getenv("USER_CONFIRM_EMAIL_CHANGE_URL")
+		settings.Meta.ConfirmEmailChangeTemplate = confirmEmailChangeTemplate
+	}
+
+	/// Merge new with old / default settings; validate settings; marshal settings to JSON, update DB and refresh app settings
+	err = e.App.Settings().Merge(settings)
+	if err != nil {
+		log.Printf("Error merging settings: err=%s", err)
+		return err
+	}
+	err = e.App.Settings().Validate()
+	if err != nil {
+		log.Printf("Error validating merged settings: err=%s", err)
+		return err
+	}
+	j, err := json.Marshal(e.App.Settings())
+	if err != nil {
+		log.Printf("Error marshal settings: err=%s", err)
+		return err
+	}
+	_, err = e.App.DB().NewQuery("UPDATE `_params` SET `value`={:j} WHERE `key`='settings'").Bind(dbx.Params{"j": j}).Execute()
+	if err != nil {
+		log.Printf("Error update settings: err=%s", err)
+		return err
+	}
+	log.Println("(SUCCESS) Update settings")
+	e.App.RefreshSettings()
+	return nil
 }
