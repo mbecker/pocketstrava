@@ -105,4 +105,4 @@ require (
 	modernc.org/token v1.0.0 // indirect
 )
 
-replace github.com/pocketbase/pocketbase => github.com/mbecker/pocketbase v0.6.1
+replace github.com/pocketbase/pocketbase => github.com/mbecker/pocketbase v0.6.2
