@@ -16,6 +16,7 @@ const (
 	VALIDATION_SETTINGS_EMAIL_DB         = "validation_settings_email_db"
 	VALIDATION_SETTINGS_EMAIL_DBX        = "validation_settings_email_dbx"
 	VALIDATION_SETTINGS_EMAIL_NOT_UNQIUE = "validation_settings_email_not_unique"
+	VALIDATION_SETTINGS_EMAIL_COUNT_DBX  = "validation_settings_email_count_dbx"
 )
 
 type Email struct {
@@ -55,7 +56,34 @@ func EmailUniqueForUser(app *pocketbase.PocketBase, userId string, email string)
 	return nil, validation.NewError(VALIDATION_SETTINGS_EMAIL_NOT_UNQIUE, "Collection emails not unique")
 }
 
-func EmailSetValid(app *pocketbase.PocketBase, rec *models.Record) error {
+// EmailCount counts the emails in the emailcollection for the given user id
+func EmailCount(app *pocketbase.PocketBase, userId string, email string) error {
+	emailCollection, err := app.Dao().FindCollectionByNameOrId(migrations.EmailCollectionName)
+	if err != nil {
+		return validation.NewError(VALIDATION_SETTINGS_EMAIL_DB, "Collection emails not found")
+	}
+	expr := dbx.HashExp{models.ProfileCollectionUserFieldName: userId}
+	emailRecord, err := app.Dao().FindRecordsByExpr(emailCollection, expr)
+	if err != nil {
+		return validation.NewError(VALIDATION_SETTINGS_EMAIL_COUNT_DBX, "Collection emails records count")
+	}
+	if len(emailRecord) != 1 {
+		return validation.NewError(VALIDATION_SETTINGS_EMAIL_COUNT_DBX, "Collection emails records count is not 1")
+	}
+	if emailRecord[0].GetStringDataValue(migrations.EmailEmail) != email {
+		return validation.NewError(VALIDATION_SETTINGS_EMAIL_COUNT_DBX, "Collection emails records count email is not the given email")
+	}
+	return nil
+}
+
+// EmailSetValid sets the email valid and if it's the only email set it's primary=true
+func EmailSetValid(app *pocketbase.PocketBase, email string, rec *models.Record) error {
 	rec.SetDataValue(migrations.EmailValid, true)
+	userId := rec.GetStringDataValue(models.ProfileCollectionUserFieldName)
+	err := EmailCount(app, userId, email)
+	// The user id has only email and the given email is the db email; set the email to primary
+	if err == nil {
+		rec.SetDataValue(migrations.EmailPrimary, true)
+	}
 	return app.Dao().SaveRecord(rec)
 }

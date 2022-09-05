@@ -363,7 +363,7 @@ func main() {
 					return c.JSON(cErr.Code, cErr)
 				}
 
-				err = internalmodels.EmailSetValid(app, rec)
+				err = internalmodels.EmailSetValid(app, email, rec)
 				if err != nil {
 					log.Println(err)
 					cErr.Code = http.StatusBadRequest
