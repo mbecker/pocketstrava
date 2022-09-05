@@ -462,10 +462,12 @@ func main() {
 					rec.SetDataValue(models.ProfileCollectionUserFieldName, u.Id)
 					rec.SetDataValue(migrations.EmailEmail, email.Email)
 					rec.SetDataValue(migrations.EmailValid, false)
+					rec.SetDataValue(migrations.EmailPrimary, false)
 
 					log.Println(rec)
 					err = forms.NewRecordUpsert(app, rec).Submit()
 					if err != nil {
+						log.Println("????")
 						log.Println(err)
 						cErr.Code = http.StatusBadRequest
 						cErr.Level = handler.ERROR

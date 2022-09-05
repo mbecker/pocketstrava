@@ -46,6 +46,7 @@ func init() {
 			ListRule:   &profileOwnerRule,
 			ViewRule:   &profileOwnerRule,
 			UpdateRule: &profileOwnerRule,
+			DeleteRule: &profileOwnerRule,
 			Schema: schema.NewSchema(
 				&schema.SchemaField{
 					Name:     models.ProfileCollectionUserFieldName,
