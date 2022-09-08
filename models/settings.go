@@ -9,7 +9,6 @@ import (
 	"github.com/mbecker/pocketstrava/migrations"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase"
-	"github.com/pocketbase/pocketbase/daos"
 	"github.com/pocketbase/pocketbase/models"
 )
 
@@ -57,28 +56,6 @@ func EmailUniqueForUser(app *pocketbase.PocketBase, userId string, email string)
 	return nil, validation.NewError(VALIDATION_SETTINGS_EMAIL_NOT_UNQIUE, "Collection emails not unique")
 }
 
-<<<<<<< HEAD
-func IsRecordUnique(dao *daos.Dao, record *models.Record) bool {
-	var exists bool
-
-	expr := dbx.HashExp{}
-	data := record.Data()
-	for k, v := range data {
-		expr[k] = v
-	}
-
-	err := dao.RecordQuery(record.Collection()).
-		Select("count(*)").
-		AndWhere(dbx.Not(dbx.HashExp{"id": record.Id})).
-		AndWhere(expr).
-		Limit(1).
-		Row(&exists)
-
-	return err == nil && !exists
-}
-
-=======
->>>>>>> 212b45c80f06810bf52cede9488b5cb0bbaf2bc0
 // EmailCount counts the emails in the emailcollection for the given user id
 func EmailCount(app *pocketbase.PocketBase, userId string, email string) error {
 	emailCollection, err := app.Dao().FindCollectionByNameOrId(migrations.EmailCollectionName)
