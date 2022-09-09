@@ -92,6 +92,29 @@ func main() {
 		}
 	}()
 
+	app.OnCollectionViewRequest().Add(func(e *core.CollectionViewEvent) error {
+		log.Printf("Collection view hook: %+v", e.Collection.Name)
+		return nil
+	})
+
+	app.OnCollectionsListRequest().Add(func(e *core.CollectionsListEvent) error {
+		log.Printf("Collection list hook: %+v", e.Collections)
+		return nil
+	})
+
+	app.OnRecordsListRequest().Add(func(e *core.RecordsListEvent) error {
+		log.Println("--- Records list hook ---")
+		for _, r := range e.Records {
+			log.Printf("Record: %+v", r.ColumnValueMap())
+		}
+		return nil
+	})
+
+	app.OnRecordViewRequest().Add(func(e *core.RecordViewEvent) error {
+		log.Printf("Record view hook: %+v", e.Record.ColumnValueMap())
+		return nil
+	})
+
 	app.OnBeforeServe().Add(func(e *core.ServeEvent) error {
 		var err error
 		// var res sql.Result
