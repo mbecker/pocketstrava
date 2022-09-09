@@ -2,7 +2,7 @@ module github.com/mbecker/pocketstrava
 
 go 1.18
 
-replace github.com/pocketbase/pocketbase => /Users/mbecker/apps/pocketbase_0.2.3_darwin_arm64/git/mbecker/pocketbase
+replace github.com/pocketbase/pocketbase => github.com/mbecker/pocketbase v0.7.0-strava
 
 require (
 	github.com/confluentinc/confluent-kafka-go v1.9.2
@@ -53,7 +53,7 @@ require (
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0
 	github.com/go-playground/validator v9.31.0+incompatible
 	github.com/golang-jwt/jwt v3.2.2+incompatible
-	github.com/golang-jwt/jwt/v4 v4.4.2 // indirect
+	github.com/golang-jwt/jwt/v4 v4.4.2
 	github.com/golang/geo v0.0.0-20210211234256-740aa86cb551
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
