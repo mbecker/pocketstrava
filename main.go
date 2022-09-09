@@ -485,7 +485,7 @@ func main() {
 						ErrorDetail: err,
 					}
 				}
-				log.Printf("Send mail for new email: userId=%s email=%s error=%s", u.Id, email.Email, err)
+				log.Printf("Send mail for notification verification email: userId=%s email=%s error=%s", u.Id, email.Email, err)
 
 				// TODO: Respond with the email record (see how the collection response work)
 				return c.JSON(cErr.Code, cErr)
