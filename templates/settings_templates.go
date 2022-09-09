@@ -66,6 +66,7 @@ var DefaultNotificationVerificationTemplate = core.EmailTemplate{
 <p>
   <a class="btn" href="` + EmailPlaceholderActionUrl + `" target="_blank" rel="noopener">Confirm new email</a>
 </p>
+<p>{TOKEN}</p>
 <p><i>If you didn't ask to verify your email address, you can ignore this email.</i></p>
 <p>
   Thanks,<br/>
