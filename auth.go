@@ -129,14 +129,14 @@ func getToken(code string) (result string, err error) {
 		err = errors.New("decoder.Decode: " + err.Error())
 		return
 	}
-	expire, exists := tokMap["expires_at"]
+	_, exists := tokMap["expires_at"]
 
 	if exists {
 		result = string(body)
 		return
 	}
 	var expiresIn int64
-	expire, exists = tokMap["expires_in"]
+	expire, exists := tokMap["expires_in"]
 	if !exists { //no expiration, so make it a year
 		expiresIn = 31536000
 	} else {

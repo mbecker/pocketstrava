@@ -21,6 +21,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v5"
 	"github.com/mbecker/pocketstrava/handler"
+	internalmails "github.com/mbecker/pocketstrava/mails"
 	"github.com/mbecker/pocketstrava/migrations"
 	internalmodels "github.com/mbecker/pocketstrava/models"
 	"github.com/pocketbase/dbx"
@@ -29,7 +30,6 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/daos"
 	"github.com/pocketbase/pocketbase/forms"
-	"github.com/pocketbase/pocketbase/mails"
 	"github.com/pocketbase/pocketbase/models"
 	"github.com/pocketbase/pocketbase/tools/auth"
 	"github.com/pocketbase/pocketbase/tools/rest"
@@ -353,7 +353,7 @@ func main() {
 					cErr.ErrorDetail = err
 					return c.JSON(cErr.Code, cErr)
 				}
-				rec, email, err := handler.ParseToken(app, token.Token)
+				rec, err := handler.ParseNotificationVerificationToken(app, token.Token)
 				if err != nil {
 					log.Println(err)
 					cErr.Code = http.StatusBadRequest
@@ -363,7 +363,7 @@ func main() {
 					return c.JSON(cErr.Code, cErr)
 				}
 
-				err = internalmodels.EmailSetValid(app, email, rec)
+				err = internalmodels.EmailSetValid(app, rec)
 				if err != nil {
 					log.Println(err)
 					cErr.Code = http.StatusBadRequest
@@ -373,7 +373,7 @@ func main() {
 					return c.JSON(cErr.Code, cErr)
 				}
 
-				cErr.Message = fmt.Sprintf("Email confirmed: %s", email)
+				cErr.Message = fmt.Sprintf("Email confirmed: %s", rec.GetStringDataValue(migrations.EmailEmail))
 				return c.JSON(cErr.Code, cErr)
 			}, Middlewares: []echo.MiddlewareFunc{
 				apis.RequireAdminOrUserAuth(),
@@ -464,11 +464,8 @@ func main() {
 					rec.SetDataValue(migrations.EmailValid, false)
 					rec.SetDataValue(migrations.EmailPrimary, false)
 
-					log.Println(rec)
 					err = forms.NewRecordUpsert(app, rec).Submit()
 					if err != nil {
-						log.Println("????")
-						log.Println(err)
 						cErr.Code = http.StatusBadRequest
 						cErr.Level = handler.ERROR
 						cErr.Message = "Error saving record"
@@ -477,8 +474,8 @@ func main() {
 					}
 				}
 
-				u.Email = email.Email
-				err = mails.SendUserChangeEmail(app, u, email.Email)
+				// Send the notification verification email
+				err = internalmails.SendNotificationVerificationEmail(app, u.Id, email.Email)
 
 				if err != nil {
 					cErr = handler.CustomError{
@@ -622,10 +619,10 @@ func main() {
 		log.Printf("Found OAuthTokenRecords: %+v", oAuthTokenRecords)
 		// Create record "token"
 		if len(oAuthTokenRecords) == 0 {
-			_, err = newOAuthTokenRecord(app.Dao(), nil, oAuthTokenCollection, &e.User.Id, &meta.Id, &meta.Token)
+			_, err = newOAuthTokenRecord(app.Dao(), nil, oAuthTokenCollection, &e.User.Id, &meta.Id, meta.Token)
 		} else if len(oAuthTokenRecords) == 1 {
 			// Update record
-			_, err = newOAuthTokenRecord(app.Dao(), oAuthTokenRecords[0], nil, &e.User.Id, &meta.Id, &meta.Token)
+			_, err = newOAuthTokenRecord(app.Dao(), oAuthTokenRecords[0], nil, &e.User.Id, &meta.Id, meta.Token)
 		} else {
 			// Problem: More than one record for the user/provider
 			err = errors.New("more than one record for user/provider")
@@ -635,30 +632,30 @@ func main() {
 			return err
 		}
 
-		log.Printf("Meta: %s", meta)
+		log.Printf("Meta: %+v", meta)
 
 		// Request Strava activities for each AuthRequest
-		stravaUserId, err := strconv.ParseInt(meta.Id, 10, 64)
-		if err != nil {
-			log.Printf("Error parsing strava athlete id: %s", err)
-			return err
-		}
-		var msg StravaActivitiesMsg
-		client := strava.NewClient(meta.Token.AccessToken)
-		services := strava.NewAthletesService(client).ListActivities(stravaUserId)
-		if msg.Before != 0 {
-			services.Before(msg.Before)
-		}
-		if msg.After != 0 {
-			services.After(msg.After)
-		}
-		activities, err := services.Do()
-		if err != nil {
-			log.Printf("error requesting strava activities: %s", err)
-			return err
-		}
+		// stravaUserId, err := strconv.ParseInt(meta.Id, 10, 64)
+		// if err != nil {
+		// 	log.Printf("Error parsing strava athlete id: %s", err)
+		// 	return err
+		// }
+		// var msg StravaActivitiesMsg
+		// client := strava.NewClient(meta.Token.AccessToken)
+		// services := strava.NewAthletesService(client).ListActivities(stravaUserId)
+		// if msg.Before != 0 {
+		// 	services.Before(msg.Before)
+		// }
+		// if msg.After != 0 {
+		// 	services.After(msg.After)
+		// }
+		// activities, err := services.Do()
+		// if err != nil {
+		// 	log.Printf("error requesting strava activities: %s", err)
+		// 	return err
+		// }
 
-		createActivities(app, e.User.Id, activities)
+		// createActivities(app, e.User.Id, activities)
 
 		log.Println("=== END Hook OnUserAuthRequest ===")
 		return nil
@@ -780,8 +777,10 @@ func newOAuthTokenRecord(dao *daos.Dao, rec *models.Record, collection *models.C
 			Value:          bdata,
 		}, nil)
 	}
-	log.Printf("Error: %s", err)
-	log.Printf("Record: %s", rec)
+	if err != nil {
+		log.Printf("Error: %s", err)
+	}
+	// log.Printf("Record: %s", rec)
 	return rec, err
 }
 
@@ -799,8 +798,12 @@ func setAppSettings(e *core.ServeEvent) error {
 	var settings *core.Settings = core.NewSettings()
 	settings.Meta.AppName = os.Getenv("APP_NAME")
 	settings.StravaAuth.Enabled = true
+	settings.StravaAuth.AllowRegistrations = true
 	settings.StravaAuth.ClientId = os.Getenv("CLIENT_ID")
 	settings.StravaAuth.ClientSecret = os.Getenv("CLIENT_SECRET")
+
+	settings.UserAuthToken.Secret = os.Getenv("USER_AUTH_TOKEN_SECRET")
+	settings.UserVerificationToken.Secret = os.Getenv("USER_VERIFICATION_TOKEN_SECRET")
 
 	// SMTP
 	smtpEnabled, err := strconv.ParseBool(os.Getenv("SMTP_ENABLED"))

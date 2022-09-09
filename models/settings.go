@@ -19,15 +19,6 @@ const (
 	VALIDATION_SETTINGS_EMAIL_COUNT_DBX  = "validation_settings_email_count_dbx"
 )
 
-type Email struct {
-	Email     string `json:"email" validate:"required,email"`
-	Retrigger bool   `json:"retrigger"`
-}
-
-type Token struct {
-	Token string `json:"token" validate:"required,token"`
-}
-
 type CustomValidator struct {
 	validator *validator.Validate
 }
@@ -77,9 +68,10 @@ func EmailCount(app *pocketbase.PocketBase, userId string, email string) error {
 }
 
 // EmailSetValid sets the email valid and if it's the only email set it's primary=true
-func EmailSetValid(app *pocketbase.PocketBase, email string, rec *models.Record) error {
+func EmailSetValid(app *pocketbase.PocketBase, rec *models.Record) error {
 	rec.SetDataValue(migrations.EmailValid, true)
 	userId := rec.GetStringDataValue(models.ProfileCollectionUserFieldName)
+	email := rec.GetStringDataValue(migrations.EmailEmail)
 	err := EmailCount(app, userId, email)
 	// The user id has only email and the given email is the db email; set the email to primary
 	if err == nil {

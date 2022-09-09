@@ -2,11 +2,13 @@ module github.com/mbecker/pocketstrava
 
 go 1.18
 
+replace github.com/pocketbase/pocketbase => /Users/mbecker/apps/pocketbase_0.2.3_darwin_arm64/git/mbecker/pocketbase
+
 require (
 	github.com/confluentinc/confluent-kafka-go v1.9.2
 	github.com/joho/godotenv v1.4.0
 	github.com/labstack/echo/v5 v5.0.0-20220201181537-ed2888cfa198
-	github.com/pocketbase/pocketbase v0.0.0-00010101000000-000000000000
+	github.com/pocketbase/pocketbase v0.7.0
 )
 
 require (
@@ -104,5 +106,3 @@ require (
 	modernc.org/strutil v1.1.2 // indirect
 	modernc.org/token v1.0.0 // indirect
 )
-
-replace github.com/pocketbase/pocketbase => github.com/mbecker/pocketbase v0.6.2
