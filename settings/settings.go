@@ -28,6 +28,7 @@ func setInitialAdmin(app core.App) {
 func SetAppSettings(e *core.ServeEvent) error {
 	setInitialAdmin(e.App)
 	var settings *core.Settings = core.NewSettings()
+	settings.Meta.AppUrl = os.Getenv("APP_URL")
 	settings.Meta.AppName = os.Getenv("APP_NAME")
 	settings.StravaAuth.Enabled = true
 	settings.StravaAuth.AllowRegistrations = true
