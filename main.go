@@ -14,6 +14,7 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/golang/geo/s2"
+	strava "github.com/strava/go.strava"
 	"github.com/twpayne/go-polyline"
 
 	staticmaps "github.com/flopp/go-staticmaps"
@@ -147,9 +148,13 @@ func main() {
 		})
 		c.Start()
 		log.Printf("%+v", c.Entries())
-		// serves static files from the provided public dir (if exists)
+
+		/**
+		* Route: public
+		* /public
+		 */
 		subFs := echo.MustSubFS(e.Router.Filesystem, "pb_public")
-		e.Router.GET("/*", apis.StaticDirectoryHandler(subFs, false))
+		e.Router.GET("/public/*", apis.StaticDirectoryHandler(subFs, false))
 
 		/**
 		 * Route: MAP
@@ -498,27 +503,27 @@ func main() {
 		go db.CreateOAuthTokenRecord(app, &e.User.Id, &meta.Id, meta.Token, KP, &KPTOPIC)
 
 		// Request Strava activities for each AuthRequest
-		// stravaUserId, err := strconv.ParseInt(meta.Id, 10, 64)
-		// if err != nil {
-		// 	log.Printf("Error parsing strava athlete id: %s", err)
-		// 	return err
-		// }
-		// var msg StravaActivitiesMsg
-		// client := strava.NewClient(meta.Token.AccessToken)
-		// services := strava.NewAthletesService(client).ListActivities(stravaUserId)
-		// if msg.Before != 0 {
-		// 	services.Before(msg.Before)
-		// }
-		// if msg.After != 0 {
-		// 	services.After(msg.After)
-		// }
-		// activities, err := services.Do()
-		// if err != nil {
-		// 	log.Printf("error requesting strava activities: %s", err)
-		// 	return err
-		// }
+		stravaUserId, err := strconv.ParseInt(meta.Id, 10, 64)
+		if err != nil {
+			log.Printf("Error parsing strava athlete id: %s", err)
+			return err
+		}
+		var msg StravaActivitiesMsg
+		client := strava.NewClient(meta.Token.AccessToken)
+		services := strava.NewAthletesService(client).ListActivities(stravaUserId)
+		if msg.Before != 0 {
+			services.Before(msg.Before)
+		}
+		if msg.After != 0 {
+			services.After(msg.After)
+		}
+		activities, err := services.Do()
+		if err != nil {
+			log.Printf("error requesting strava activities: %s", err)
+			return err
+		}
 
-		// createActivities(app, e.User.Id, activities)
+		go db.CreateActivities(app, e.User.Id, activities)
 
 		logEndHook("OnUserAuthRequest")
 		return nil

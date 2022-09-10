@@ -14,6 +14,7 @@ import (
 const (
 	MapTemplatesCollectionName = "maptemplates"
 	MapTemplatesJson           = "json"
+	MapTemplatesUrl            = "url"
 	MapTemplatesPrimary        = "primary"
 )
 
@@ -47,6 +48,14 @@ func init() {
 					Required: true,
 					Unique:   false,
 					Options:  &schema.JsonOptions{},
+				},
+				&schema.SchemaField{
+					Name: MapTemplatesUrl,
+					Type: schema.FieldTypeUrl,
+					// Options:  &schema.NumberOptions{},
+					Required: true,
+					Unique:   false,
+					Options:  &schema.UrlOptions{},
 				},
 				&schema.SchemaField{
 					Name:     MapTemplatesPrimary,

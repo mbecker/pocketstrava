@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
@@ -30,8 +31,10 @@ func CreateDefaultMapTemplate(app core.App, userId *string) {
 	rec.SetDataValue(models.ProfileCollectionUserFieldName, userId)
 	rec.SetDataValue(migrations.MapTemplatesPrimary, true)
 	rec.SetDataValue(migrations.MapTemplatesJson, defaultMaptemplate)
+	rec.SetDataValue(migrations.MapTemplatesUrl, fmt.Sprintf("%s/public/maps/default.png", app.Settings().Meta.AppUrl))
 
-	err = forms.NewRecordUpsert(app, rec).Submit()
+	formsRecordUpsert := forms.NewRecordUpsert(app, rec)
+	err = formsRecordUpsert.Submit()
 	if err != nil {
 		log.Printf("Error saving default map template for new user: %s", err)
 	}

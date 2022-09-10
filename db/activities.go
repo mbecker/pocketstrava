@@ -1,4 +1,4 @@
-package models
+package db
 
 import (
 	"fmt"
@@ -16,7 +16,7 @@ type LatLng struct {
 	Lng float64 `json:"lng"`
 }
 
-func createActivities(app *pocketbase.PocketBase, userId string, activities []*strava.ActivitySummary) error {
+func CreateActivities(app *pocketbase.PocketBase, userId string, activities []*strava.ActivitySummary) error {
 
 	activityCollection, err := app.Dao().FindCollectionByNameOrId(migrations.ActivityCollectionName)
 	if err != nil {
