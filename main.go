@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"image/color"
@@ -20,23 +19,22 @@ import (
 	staticmaps "github.com/flopp/go-staticmaps"
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v5"
+	"github.com/mbecker/pocketstrava/db"
 	"github.com/mbecker/pocketstrava/handler"
 	internalmails "github.com/mbecker/pocketstrava/mails"
 	"github.com/mbecker/pocketstrava/migrations"
 	internalmodels "github.com/mbecker/pocketstrava/models"
+	internalsettings "github.com/mbecker/pocketstrava/settings"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/daos"
 	"github.com/pocketbase/pocketbase/forms"
 	"github.com/pocketbase/pocketbase/models"
 	"github.com/pocketbase/pocketbase/tools/auth"
 	"github.com/pocketbase/pocketbase/tools/rest"
 	"github.com/pocketbase/pocketbase/tools/types"
 	"github.com/robfig/cron/v3"
-	strava "github.com/strava/go.strava"
-	"golang.org/x/oauth2"
 )
 
 const ContextUserKey string = "user"
@@ -92,54 +90,11 @@ func main() {
 		}
 	}()
 
-	app.OnCollectionViewRequest().Add(func(e *core.CollectionViewEvent) error {
-		log.Printf("Collection view hook: %+v", e.Collection.Name)
-		return nil
-	})
-
-	app.OnCollectionsListRequest().Add(func(e *core.CollectionsListEvent) error {
-		log.Printf("Collection list hook: %+v", e.Collections)
-		return nil
-	})
-
-	app.OnRecordsListRequest().Add(func(e *core.RecordsListEvent) error {
-		log.Println("--- Records list hook ---")
-		for _, r := range e.Records {
-			log.Printf("Record: %+v", r.ColumnValueMap())
-		}
-		return nil
-	})
-
-	app.OnRecordViewRequest().Add(func(e *core.RecordViewEvent) error {
-		log.Printf("Record view hook: %+v", e.Record.ColumnValueMap())
-		return nil
-	})
-
 	app.OnBeforeServe().Add(func(e *core.ServeEvent) error {
-		var err error
-		// var res sql.Result
-		// res, err := e.App.Dao().DB().NewQuery("CREATE UNIQUE INDEX activities_activityid_IDX ON activities (activityid)").Execute()
-		// if err != nil {
-		// 	log.Printf("Error create index: err=%s", err)
-		// } else {
-		// 	log.Printf("Success create index: res=%s", res)
-		// }
-
-		// Init Admin
-		admin := &models.Admin{}
-		form := forms.NewAdminUpsert(app, admin)
-		form.Email = os.Getenv("ADMIN_EMAIL")
-		form.Password = os.Getenv("ADMIN_PASSWORD")
-		form.PasswordConfirm = os.Getenv("ADMIN_PASSWORD")
-		err = form.Submit()
-		if err != nil {
-			log.Printf("Error creating admin: err=%s", err)
-		}
-
 		/**
 		* SETTINGS
 		 */
-		err = setAppSettings(e)
+		err := internalsettings.SetAppSettings(e)
 		if err != nil {
 			log.Panicf("(ERROR) Updating settings: err=%s", err)
 		}
@@ -184,14 +139,8 @@ func main() {
 				log.Printf("Oauth2 Token: %+v", oauth2Token)
 				userId := t.GetStringDataValue("userId")
 				providerUserId := t.GetStringDataValue("provideruserid")
-				rec, err := newOAuthTokenRecord(app.Dao(), t, oAuthTokenCollection, &userId, &providerUserId, oauth2Token)
-				if err != nil {
-					log.Printf("Error updating recors: rec.id=%s err=%s", rec.Id, err)
-					continue
-				} else {
-					log.Printf("Updated record: %s", t.Id)
-					updated = append(updated, rec.Id)
-				}
+				go db.CreateOAuthTokenRecord(app, &userId, &providerUserId, oauth2Token, KP, &KPTOPIC)
+
 				log.Println("------")
 			}
 			log.Printf("Updated OAuthToken records: %s", updated)
@@ -396,7 +345,7 @@ func main() {
 					return c.JSON(cErr.Code, cErr)
 				}
 
-				cErr.Message = fmt.Sprintf("Email confirmed: %s", rec.GetStringDataValue(migrations.EmailEmail))
+				cErr.Message = fmt.Sprintf("Email confirmed: %s", rec.GetStringDataValue(migrations.NotificationsEmail))
 				return c.JSON(cErr.Code, cErr)
 			}, Middlewares: []echo.MiddlewareFunc{
 				apis.RequireAdminOrUserAuth(),
@@ -437,7 +386,7 @@ func main() {
 				}
 
 				// Insert and check database
-				emailCollection, err := app.Dao().FindCollectionByNameOrId(migrations.EmailCollectionName)
+				emailCollection, err := app.Dao().FindCollectionByNameOrId(migrations.NotificationsCollectionName)
 				if err != nil {
 					cErr.Code = http.StatusBadRequest
 					cErr.Level = handler.ERROR
@@ -449,7 +398,7 @@ func main() {
 				// If "email.retrigger" then check that the email is already in DB and that it's not valid
 				var expr dbx.HashExp
 				if email.Retrigger {
-					expr = dbx.HashExp{"email": email.Email, models.ProfileCollectionUserFieldName: u.Id, migrations.EmailValid: false}
+					expr = dbx.HashExp{"email": email.Email, models.ProfileCollectionUserFieldName: u.Id, migrations.NotificationsValid: false}
 				} else {
 					expr = dbx.HashExp{"email": email.Email, models.ProfileCollectionUserFieldName: u.Id}
 				}
@@ -483,9 +432,9 @@ func main() {
 
 					rec := models.NewRecord(emailCollection)
 					rec.SetDataValue(models.ProfileCollectionUserFieldName, u.Id)
-					rec.SetDataValue(migrations.EmailEmail, email.Email)
-					rec.SetDataValue(migrations.EmailValid, false)
-					rec.SetDataValue(migrations.EmailPrimary, false)
+					rec.SetDataValue(migrations.NotificationsEmail, email.Email)
+					rec.SetDataValue(migrations.NotificationsValid, false)
+					rec.SetDataValue(migrations.NotificationsPrimary, false)
 
 					err = forms.NewRecordUpsert(app, rec).Submit()
 					if err != nil {
@@ -518,100 +467,10 @@ func main() {
 			},
 		})
 
-		/**
-		 * STRAVA ACTIVITIES
-		 */
-
-		// "POST /api/strava/activities"
-		// Request Query Params: after(int64), before(int64)
-		e.Router.AddRoute(echo.Route{
-			Method: http.MethodPost,
-			Path:   "/api/strava/activities",
-			Handler: func(c echo.Context) error {
-				user, ok := c.Get(ContextUserKey).(*models.User)
-				if !ok {
-					return c.JSON(http.StatusUnauthorized, rest.NewForbiddenError("no auth user", nil))
-				}
-
-				// Unmarshal
-				var msg StravaActivitiesMsg
-				afters := c.QueryParam("after")
-				if len(afters) > 0 {
-					log.Printf("Found query param after: %s", afters)
-					afteri, err := strconv.ParseInt(afters, 10, 64)
-					if err == nil {
-						log.Printf("Found query param after (int64): %d", afteri)
-						msg.After = afteri
-					}
-				}
-				before := c.QueryParam("before")
-				if len(before) > 0 {
-					log.Printf("Found query param before: %s", before)
-					beforei, err := strconv.ParseInt(before, 10, 64)
-					if err == nil {
-						log.Printf("Found query param after (int64): %d", beforei)
-						msg.Before = beforei
-					}
-				}
-
-				oAuthTokenCollection, err := app.Dao().FindCollectionByNameOrId(migrations.OAuthTokenCollectionName)
-				if err != nil {
-					return c.JSON(http.StatusUnauthorized, rest.NewNotFoundError("collection not found", nil))
-				}
-				expr := dbx.HashExp{"provider": "strava", "userId": user.Id}
-				oAuthTokenRecords, err := app.Dao().FindRecordsByExpr(oAuthTokenCollection, expr)
-				if err != nil {
-					return c.JSON(http.StatusUnauthorized, rest.NewBadRequestError("no token", nil))
-				}
-				if len(oAuthTokenRecords) == 0 {
-					return c.JSON(http.StatusUnauthorized, rest.NewBadRequestError("no token", nil))
-				}
-				if len(oAuthTokenRecords) > 1 {
-					return c.JSON(http.StatusUnauthorized, rest.NewBadRequestError("more tokens than expected", nil))
-				}
-				oAuthTokenRecord := oAuthTokenRecords[0]
-				accessToken, ok := oAuthTokenRecord.GetDataValue(migrations.OAuthTokenCollectionAccessToken).(string)
-				if !ok {
-					return c.JSON(http.StatusBadRequest, rest.NewBadRequestError("access_token not type valid", nil))
-				}
-				log.Printf("AccessToken: %s", accessToken)
-
-				providerUserIdTmp, ok := oAuthTokenRecord.GetDataValue((migrations.OAuthTokenCollectionProviderUserId)).(string)
-				if !ok {
-					return c.JSON(http.StatusBadRequest, rest.NewBadRequestError("provider user id not type valid", nil))
-				}
-				providerUserId, err := strconv.ParseInt(providerUserIdTmp, 10, 64)
-				if err != nil {
-					return c.JSON(http.StatusBadRequest, rest.NewBadRequestError("provider user id not type valid for request", nil))
-				}
-
-				client := strava.NewClient(accessToken)
-				services := strava.NewAthletesService(client).ListActivities(providerUserId)
-				if msg.Before != 0 {
-					services.Before(msg.Before)
-				}
-				if msg.After != 0 {
-					services.After(msg.After)
-				}
-				activities, err := services.Do()
-				if err != nil {
-					log.Printf("err=%s", err)
-					return c.JSON(http.StatusUnauthorized, err)
-				}
-
-				createActivities(app, user.Id, activities)
-				return c.JSON(200, activities)
-			},
-			Middlewares: []echo.MiddlewareFunc{
-				apis.RequireAdminOrUserAuth(),
-			},
-		})
-
 		return nil
 	})
 
 	app.OnSettingsBeforeUpdateRequest().Add(func(data *core.SettingsUpdateEvent) error {
-		log.Printf("Settings data: %+v", data.NewSettings.StravaAuth)
 		return nil
 	})
 
@@ -623,39 +482,20 @@ func main() {
 
 	app.OnUserAuthRequest().Add(func(e *core.UserAuthEvent) error {
 
-		log.Println("=== START Hook OnUserAuthRequest ===")
+		logStartHook("OnUserAuthRequest")
+
+		// Create map template
+		go db.CreateDefaultMapTemplate(app, &e.User.Id)
+
+		// Update strava oauth access token
+
 		meta, ok := e.Meta.(*auth.AuthUser)
 		if !ok {
 			log.Printf("Event hook -- OnAuthRequest: No AuthUser in meta")
 			return nil
 		}
 
-		oAuthTokenCollection, err := app.Dao().FindCollectionByNameOrId(migrations.OAuthTokenCollectionName)
-		if err != nil {
-			return err
-		}
-		expr := dbx.HashExp{"provider": "strava", "userId": e.User.Id}
-		oAuthTokenRecords, err := app.Dao().FindRecordsByExpr(oAuthTokenCollection, expr)
-		if err != nil {
-			return err
-		}
-		log.Printf("Found OAuthTokenRecords: %+v", oAuthTokenRecords)
-		// Create record "token"
-		if len(oAuthTokenRecords) == 0 {
-			_, err = newOAuthTokenRecord(app.Dao(), nil, oAuthTokenCollection, &e.User.Id, &meta.Id, meta.Token)
-		} else if len(oAuthTokenRecords) == 1 {
-			// Update record
-			_, err = newOAuthTokenRecord(app.Dao(), oAuthTokenRecords[0], nil, &e.User.Id, &meta.Id, meta.Token)
-		} else {
-			// Problem: More than one record for the user/provider
-			err = errors.New("more than one record for user/provider")
-		}
-		if err != nil {
-			log.Printf("Error creating / updating oauthtoken record: %s", err)
-			return err
-		}
-
-		log.Printf("Meta: %+v", meta)
+		go db.CreateOAuthTokenRecord(app, &e.User.Id, &meta.Id, meta.Token, KP, &KPTOPIC)
 
 		// Request Strava activities for each AuthRequest
 		// stravaUserId, err := strconv.ParseInt(meta.Id, 10, 64)
@@ -680,196 +520,46 @@ func main() {
 
 		// createActivities(app, e.User.Id, activities)
 
-		log.Println("=== END Hook OnUserAuthRequest ===")
+		logEndHook("OnUserAuthRequest")
+		return nil
+	})
+
+	app.OnCollectionViewRequest().Add(func(e *core.CollectionViewEvent) error {
+		log.Printf("Collection view hook: %+v", e.Collection.Name)
+		return nil
+	})
+
+	app.OnCollectionsListRequest().Add(func(e *core.CollectionsListEvent) error {
+		log.Printf("Collection list hook: %+v", e.Collections)
+		return nil
+	})
+
+	app.OnRecordsListRequest().Add(func(e *core.RecordsListEvent) error {
+		logStartHook("OnRecordsListRequest")
+		log.Printf("Collection name: %s", e.Collection.Name)
+		for _, r := range e.Records {
+			log.Printf("Record: %+v", r.ColumnValueMap())
+		}
+		logEndHook("OnRecordsListRequest")
+		return nil
+	})
+
+	app.OnRecordViewRequest().Add(func(e *core.RecordViewEvent) error {
 		return nil
 	})
 
 	/**
 	* App Start
 	 */
-
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-type LatLng struct {
-	Lat float64 `json:"lat"`
-	Lng float64 `json:"lng"`
+func logStartHook(hook string) {
+	log.Printf("=== START Hook ::: %s ===", hook)
 }
 
-func createActivities(app *pocketbase.PocketBase, userId string, activities []*strava.ActivitySummary) error {
-
-	activityCollection, err := app.Dao().FindCollectionByNameOrId(migrations.ActivityCollectionName)
-	if err != nil {
-		return err
-	}
-
-	// "SELECT * FROM _users WHERE email={:email}",
-	for _, a := range activities {
-		// expr := dbx.HashExp{migrations.ActivityId: a.Id}
-		// activityRecords, err := app.Dao().FindRecordsByExpr(activityCollection, expr)
-		// if err != nil {
-		// 	log.Panicln(err)
-		// 	continue
-		// }
-		// if len(activityRecords) > 0 {
-		// 	log.Printf("Activity Record found: activity.id=%d", a.Id)
-		// 	continue
-		// }
-
-		startLatLng := LatLng{
-			Lat: a.StartLocation[0],
-			Lng: a.StartLocation[1],
-		}
-		endLatLng := LatLng{
-			Lat: a.EndLocation[0],
-			Lng: a.EndLocation[1],
-		}
-		// activity, err := json.Marshal(a)
-		// if err != nil {
-		// 	log.Println(err)
-		// 	continue
-		// }
-		rec := models.NewRecord(activityCollection)
-		rec.SetDataValue(migrations.ProfileCollectionUserId, userId)
-		rec.SetDataValue(migrations.ActivityId, a.Id)
-		rec.SetDataValue(migrations.ActivityExternalId, a.ExternalId)
-		rec.SetDataValue(migrations.ActivityUploadId, a.UploadId)
-		rec.SetDataValue(migrations.ActivityAthleteId, a.Athlete.Id)
-		rec.SetDataValue(migrations.ActivityName, a.Name)
-		rec.SetDataValue(migrations.ActivityDistance, a.Distance)
-		rec.SetDataValue(migrations.ActivityMovingTime, a.MovingTime)
-		rec.SetDataValue(migrations.ActivityElapsedTime, a.ElapsedTime)
-		rec.SetDataValue(migrations.ActivityTotalElevationGain, a.TotalElevationGain)
-		rec.SetDataValue(migrations.ActivityType, a.Type)
-		rec.SetDataValue(migrations.ActivityStartDate, a.StartDate)
-		rec.SetDataValue(migrations.ActivityStartDateLocal, a.StartDateLocal)
-		rec.SetDataValue(migrations.ActivityTimeZone, a.TimeZone)
-		rec.SetDataValue(migrations.ActivityStartLatLng, startLatLng)
-		rec.SetDataValue(migrations.ActivityEndLatLng, endLatLng)
-		rec.SetDataValue(migrations.ActivityMapId, a.Map.Id)
-		rec.SetDataValue(migrations.ActivityMapPolyline, string(a.Map.SummaryPolyline))
-		rec.SetDataValue(migrations.Activity, a)
-		err := forms.NewRecordUpsert(app, rec).Submit()
-		if err != nil {
-			fmt.Println(err)
-			continue
-		}
-
-		// HACK: will change in v0.4.0 and the hooks will be replaced with onModelAfterCreate and OnModelAfterUpdate (they are triggered automatically on successful insert/update db operation).
-		event := &core.RecordCreateEvent{Record: rec}
-		app.OnRecordAfterCreateRequest().Trigger(event)
-
-		// event := &core.RecordUpdateEvent{Record: rec}
-		// app.OnRecordAfterUpdateRequest().Trigger(event)
-	}
-	return nil
-
-}
-
-func newOAuthTokenRecord(dao *daos.Dao, rec *models.Record, collection *models.Collection, userId *string, providerUserId *string, token *oauth2.Token) (*models.Record, error) {
-	log.Printf("New OauthTokenRecord: userId=%s providerUserId=%s token=%+v", *userId, *providerUserId, token)
-	if rec == nil {
-		rec = models.NewRecord(collection)
-	}
-	provider := "strava"
-	rec.SetDataValue(migrations.OAuthTokenCollectionNameProvider, provider)
-	rec.SetDataValue(migrations.ProfileCollectionUserId, userId)
-	rec.SetDataValue(migrations.OAuthTokenCollectionProviderUserId, providerUserId)
-	rec.SetDataValue(migrations.OAuthTokenCollectionAccessToken, token.AccessToken)
-	rec.SetDataValue(migrations.OAuthTokenCollectionRefreshToken, token.RefreshToken)
-	rec.SetDataValue(migrations.OAuthTokenCollectionTokenType, token.TokenType)
-	rec.SetDataValue(migrations.OAuthTokenCollectionExpiry, token.Expiry)
-	err := dao.SaveRecord(rec)
-	data := OAuthToken{
-		Provider:       provider,
-		UserId:         *userId,
-		ProviderUserId: *providerUserId,
-		AccessToken:    token.AccessToken,
-		RefreshToken:   token.RefreshToken,
-		TokenType:      token.TokenType,
-		Expiry:         token.Expiry,
-	}
-	bdata, berr := json.Marshal(data)
-
-	if berr == nil {
-		KP.Produce(&kafka.Message{
-			TopicPartition: kafka.TopicPartition{Topic: &KPTOPIC, Partition: kafka.PartitionAny},
-			Key:            []byte(*providerUserId),
-			Value:          bdata,
-		}, nil)
-	}
-	if err != nil {
-		log.Printf("Error: %s", err)
-	}
-	// log.Printf("Record: %s", rec)
-	return rec, err
-}
-
-type OAuthToken struct {
-	Provider       string    `json,db:"provider"`
-	UserId         string    `json,db:"userId"`
-	ProviderUserId string    `json,db:"provideruserid"`
-	AccessToken    string    `json,db:"access_token"`
-	RefreshToken   string    `json,db:"refresh_token"`
-	TokenType      string    `json,db:"token_type"`
-	Expiry         time.Time `json,db:"expiry"`
-}
-
-func setAppSettings(e *core.ServeEvent) error {
-	var settings *core.Settings = core.NewSettings()
-	settings.Meta.AppName = os.Getenv("APP_NAME")
-	settings.StravaAuth.Enabled = true
-	settings.StravaAuth.AllowRegistrations = true
-	settings.StravaAuth.ClientId = os.Getenv("CLIENT_ID")
-	settings.StravaAuth.ClientSecret = os.Getenv("CLIENT_SECRET")
-
-	settings.UserAuthToken.Secret = os.Getenv("USER_AUTH_TOKEN_SECRET")
-	settings.UserVerificationToken.Secret = os.Getenv("USER_VERIFICATION_TOKEN_SECRET")
-
-	// SMTP
-	smtpEnabled, err := strconv.ParseBool(os.Getenv("SMTP_ENABLED"))
-	if err == nil && smtpEnabled {
-		settings.Meta.SenderAddress = os.Getenv("META_SENDER_ADDRESS")
-		settings.Smtp.Enabled = true
-		settings.Smtp.Host = os.Getenv("SMTP_HOST")
-		port, err := strconv.Atoi(os.Getenv("SMTP_PORT"))
-		if err != nil {
-			settings.Smtp.Port = port
-		}
-		settings.Smtp.Password = os.Getenv(("SMTP_PASSWORD"))
-		settings.Smtp.Username = os.Getenv(("SMTP_USERNAME"))
-	}
-
-	if len(os.Getenv("USER_CONFIRM_EMAIL_CHANGE_URL")) > 0 {
-		confirmEmailChangeTemplate := settings.Meta.ConfirmEmailChangeTemplate
-		confirmEmailChangeTemplate.ActionUrl = os.Getenv("USER_CONFIRM_EMAIL_CHANGE_URL")
-		settings.Meta.ConfirmEmailChangeTemplate = confirmEmailChangeTemplate
-	}
-
-	/// Merge new with old / default settings; validate settings; marshal settings to JSON, update DB and refresh app settings
-	err = e.App.Settings().Merge(settings)
-	if err != nil {
-		log.Printf("Error merging settings: err=%s", err)
-		return err
-	}
-	err = e.App.Settings().Validate()
-	if err != nil {
-		log.Printf("Error validating merged settings: err=%s", err)
-		return err
-	}
-	j, err := json.Marshal(e.App.Settings())
-	if err != nil {
-		log.Printf("Error marshal settings: err=%s", err)
-		return err
-	}
-	_, err = e.App.DB().NewQuery("UPDATE `_params` SET `value`={:j} WHERE `key`='settings'").Bind(dbx.Params{"j": j}).Execute()
-	if err != nil {
-		log.Printf("Error update settings: err=%s", err)
-		return err
-	}
-	log.Println("(SUCCESS) Update settings")
-	e.App.RefreshSettings()
-	return nil
+func logEndHook(hook string) {
+	log.Printf("=== END Hook ::: %s ===", hook)
 }

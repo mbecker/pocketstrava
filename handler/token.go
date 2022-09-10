@@ -29,11 +29,11 @@ func ParseNotificationVerificationToken(app *pocketbase.PocketBase, token string
 		return nil, validation.NewError("validation_invalid_token_payload", "Invalid token payload - id must be set.")
 	}
 
-	emailCollection, err := app.Dao().FindCollectionByNameOrId(migrations.EmailCollectionName)
+	emailCollection, err := app.Dao().FindCollectionByNameOrId(migrations.NotificationsCollectionName)
 	if err != nil {
 		return nil, err
 	}
-	expr := dbx.HashExp{"email": email, models.ProfileCollectionUserFieldName: userId, migrations.EmailValid: false}
+	expr := dbx.HashExp{"email": email, models.ProfileCollectionUserFieldName: userId, migrations.NotificationsValid: false}
 	emailRecords, err := app.Dao().FindRecordsByExpr(emailCollection, expr)
 	if err != nil {
 		return nil, err

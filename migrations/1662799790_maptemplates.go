@@ -12,17 +12,16 @@ import (
 
 // Email
 const (
-	EmailCollectionName = "stravaemails"
-	EmailEmail          = "email"
-	EmailValid          = "valid"
-	EmailPrimary        = "primary"
+	MapTemplatesCollectionName = "maptemplates"
+	MapTemplatesJson           = "json"
+	MapTemplatesPrimary        = "primary"
 )
 
 func init() {
 	m.Register(func(db dbx.Builder) error {
 		profileOwnerRule := fmt.Sprintf("%s = @request.user.id", models.ProfileCollectionUserFieldName)
 		collection := &models.Collection{
-			Name:       EmailCollectionName,
+			Name:       MapTemplatesCollectionName,
 			System:     false,
 			CreateRule: &profileOwnerRule,
 			ListRule:   &profileOwnerRule,
@@ -33,7 +32,7 @@ func init() {
 				&schema.SchemaField{
 					Name:     models.ProfileCollectionUserFieldName,
 					Type:     schema.FieldTypeUser,
-					Unique:   false,
+					Unique:   true,
 					Required: true,
 					System:   true,
 					Options: &schema.UserOptions{
@@ -42,32 +41,24 @@ func init() {
 					},
 				},
 				&schema.SchemaField{
-					Name: EmailEmail,
-					Type: schema.FieldTypeEmail,
+					Name: MapTemplatesJson,
+					Type: schema.FieldTypeJson,
 					// Options:  &schema.NumberOptions{},
 					Required: true,
 					Unique:   false,
-					Options:  &schema.EmailOptions{},
+					Options:  &schema.JsonOptions{},
 				},
 				&schema.SchemaField{
-					Name:     EmailValid,
+					Name:     MapTemplatesPrimary,
 					Type:     schema.FieldTypeBool,
 					Options:  &schema.BoolOptions{},
-					Required: false,
+					Required: true,
 					Unique:   false,
-				},
-				&schema.SchemaField{
-					Name:     EmailPrimary,
-					Type:     schema.FieldTypeBool,
-					Options:  &schema.BoolOptions{},
-					Required: false,
-					Unique:   false,
-				},
-			)}
+				})}
 		return daos.New(db).SaveCollection(collection)
 	}, func(db dbx.Builder) error {
 		tables := []string{
-			EmailCollectionName,
+			MapTemplatesCollectionName,
 		}
 
 		for _, name := range tables {
