@@ -153,7 +153,7 @@ func main() {
 		* Route: public
 		* /public
 		 */
-		subFs := echo.MustSubFS(e.Router.Filesystem, "pb_public")
+		subFs := echo.MustSubFS(e.Router.Filesystem, os.Getenv("FS_ROOT"))
 		e.Router.GET("/public/*", apis.StaticDirectoryHandler(subFs, false))
 
 		/**
